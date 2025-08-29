@@ -126,13 +126,14 @@ class BTCPayService {
 class PaymentModel {
     static async create(data) {
         const sql = `
-            INSERT INTO payments (invoice_id, amount_sats, amount_btc, description, checkout_link, bolt11, payment_hash, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO payments (invoice_id, amount_sats, amount_btc, email, description, checkout_link, bolt11, payment_hash, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         const [result] = await db.execute(sql, [
             data.invoiceId,
             data.amountSats,
             data.amountBtc,
+            data.email || null,
             data.description || null,
             data.checkoutLink || null,
             data.bolt11 || null,
@@ -175,7 +176,7 @@ class PaymentModel {
 // Créer un paiement
 app.post('/api/payment', async (req, res) => {
     try {
-        const { amountSats, description, metadata } = req.body;
+        const { amountSats, email, description, metadata } = req.body;
 
         if (!amountSats || amountSats <= 0) {
             return res.status(400).json({ error: 'amountSats requis et > 0' });
@@ -189,6 +190,7 @@ app.post('/api/payment', async (req, res) => {
             invoiceId: invoice.id,
             amountSats: amountSats,
             amountBtc: satsToBtc(amountSats),
+            email,
             description,
             checkoutLink: invoice.checkoutLink,
             bolt11: invoice.bolt11,
@@ -196,13 +198,14 @@ app.post('/api/payment', async (req, res) => {
             metadata
         });
 
-        console.log('✅ Paiement créé:', { id: paymentId, invoiceId: invoice.id });
+        console.log('✅ Paiement créé:', { id: paymentId, invoiceId: invoice.id, email });
 
         res.json({
             success: true,
             payment: {
                 id: paymentId,
                 invoiceId: invoice.id,
+                email,
                 checkoutLink: invoice.checkoutLink,
                 bolt11: invoice.bolt11,
                 amount: { sats: amountSats, btc: satsToBtc(amountSats) },
@@ -221,7 +224,6 @@ app.get('/api/payment/:invoiceId', async (req, res) => {
     try {
         const invoiceId = req.params.invoiceId;
         
-        // Validation basique de l'invoiceId
         if (!invoiceId || invoiceId.trim() === '') {
             return res.status(400).json({ error: 'Invoice ID requis' });
         }
@@ -237,6 +239,7 @@ app.get('/api/payment/:invoiceId', async (req, res) => {
             payment: {
                 id: payment.id,
                 invoiceId: payment.invoice_id,
+                email: payment.email,
                 status: payment.status,
                 amount: {
                     sats: payment.amount_sats,
@@ -272,6 +275,7 @@ app.get('/api/payments', async (req, res) => {
             payments: payments.map(p => ({
                 id: p.id,
                 invoiceId: p.invoice_id,
+                email: p.email,
                 status: p.status,
                 amount: { sats: p.amount_sats, btc: parseFloat(p.amount_btc) },
                 description: p.description,
@@ -295,7 +299,6 @@ app.post('/webhook/btcpay', async (req, res) => {
 
         console.log('🔔 Webhook reçu');
 
-        // Vérifier signature
         if (!verifyWebhookSignature(rawBody, signature)) {
             console.error('❌ Signature invalide');
             return res.status(400).json({ error: 'Signature invalide' });
@@ -304,14 +307,12 @@ app.post('/webhook/btcpay', async (req, res) => {
         const payload = JSON.parse(rawBody.toString());
         console.log('📦 Event:', payload.type, 'Invoice:', payload.invoiceId);
 
-        // Chercher le paiement
         const payment = await PaymentModel.findByInvoiceId(payload.invoiceId);
         if (!payment) {
             console.error('❌ Paiement introuvable:', payload.invoiceId);
             return res.status(404).json({ error: 'Paiement non trouvé' });
         }
 
-        // Mettre à jour selon l'événement
         let newStatus = payment.status;
         let paidAt = null;
 
@@ -331,7 +332,6 @@ app.post('/webhook/btcpay', async (req, res) => {
                 return res.json({ ignored: true });
         }
 
-        // Sauver si changement
         if (newStatus !== payment.status) {
             await PaymentModel.updateStatus(payload.invoiceId, newStatus, paidAt);
             console.log('✅ Statut mis à jour:', payment.status, '→', newStatus);
@@ -378,7 +378,6 @@ async function start() {
     });
 }
 
-// Arrêt propre
 process.on('SIGTERM', async () => {
     console.log('🔄 Arrêt...');
     if (db) await db.end();
