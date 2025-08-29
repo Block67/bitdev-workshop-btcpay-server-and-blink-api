@@ -53,6 +53,7 @@ async function createTable() {
             invoice_id VARCHAR(255) UNIQUE NOT NULL,
             amount_sats BIGINT NOT NULL,
             amount_btc DECIMAL(16,8) NOT NULL,
+            email VARCHAR(255) NULL,
             description TEXT,
             status ENUM('pending', 'paid', 'expired', 'invalid') DEFAULT 'pending',
             checkout_link TEXT,
@@ -63,12 +64,14 @@ async function createTable() {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             paid_at TIMESTAMP NULL,
             INDEX idx_invoice_id (invoice_id),
-            INDEX idx_status (status)
+            INDEX idx_status (status),
+            INDEX idx_email (email)
         )
     `;
     await db.execute(sql);
     console.log('✅ Table payments prête');
 }
+
 
 // 🔧 UTILITAIRES
 function satsToBtc(sats) {
